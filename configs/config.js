@@ -82,6 +82,13 @@ module.exports = function(u, hwInfo, callback) {
             '/etc/dropbear/*': '0600'
         },
 
+        ownership: {
+            '/etc/dropbear/*': {
+                uid: 0,
+                gid: 0
+            }
+        },
+
         // captive portal domains
         captivePortalDomains: [
             'www.apple.com',

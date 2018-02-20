@@ -225,6 +225,7 @@ var resolveAsyncParameters = function(config, callback) {
         if(argv.reallyOffline) {
             return callback(null, config);
         }
+        console.log('updateNodeInDB', config)
         u.updateNodeInDB(config, function(err, msg) {
             if(err) return callback("Error updating node in remote node database: " + err);
             callback(null, config);
@@ -303,6 +304,35 @@ var createStageDirStructure = function(stageDir, callback) {
     });
 };
 
+var setOwnership = function(ownerships, rootPath, callback) {
+    console.log('setOwnership', ownerships)
+    async.forEachOfSeries(ownerships, function(ownership, filePath, callback) {
+        if(filePath[0] == '/') {
+            filePath = filePath.slice(1);
+        }
+        var fullPath = path.join(rootPath, filePath);
+        glob(fullPath, function(err, files) {
+            if(err) return callback(err);
+            async.eachSeries(files, function(file, callback) {
+                if(!ownership) {
+                    callback();
+                }
+                console.log('fs.stat', file, fs.statSync(file))
+                console.log('fs.chown', file, ownership)
+                try {
+                    fs.chownSync(file, ownership.uid, ownership.gid);
+                    console.log('fs.stat', file, fs.statSync(file))
+                } catch (error) {
+                    console.error('BEN ERROR', error)
+                    return callback(error)
+                }
+                callback()
+            }, callback);
+        });
+
+    }, callback);
+};
+
 var setPermissions = function(permissions, rootPath, callback) {
     async.forEachOfSeries(permissions, function(bitmask, filePath, callback) {
         if(filePath[0] == '/') {
@@ -343,10 +373,14 @@ var stage = function(stageDir, hwInfo, callback) {
                         compileTemplates(config, stageDir, function(err) {
                             if(err) return callback(err);
 
-                            console.log("permissions");
-                            setPermissions(config.permissions, path.join(stageDir, 'files'), function(err) {
+                            console.log('ownership', config.ownership)
+                            setOwnership(config.ownership, path.join(stageDir, 'files'), function(err) {
+                                if (err) return callback(err)
 
-                                callback(null);
+                                console.log("permissions");
+                                setPermissions(config.permissions, path.join(stageDir, 'files'), function(err) {
+                                    callback(null);
+                                })
                             })
                         });
                     });
@@ -660,9 +694,11 @@ var installIpk = function(conn, ipkPath, callback) {
 /**
  * SSH to a host and configure it to be a sudomesh node
  * @param {String|undefined} password - password to SSH with
- * @param {String|undefined} privateKey - ssh private key as a string (e.g. contents of ~/.ssh/id_rsa.pub)
+ * @param {Object} keypair
+ * @param {String|undefined} keypair.public - ssh public key as a string (e.g. contents of ~/.ssh/id_rsa.pub)
+ * @param {String|undefined} keypair.private - ssh private key as a string (e.g. contents of ~/.ssh/id_rsa)
  */
-var configureNode = function(ip, port, password, privateKey, callback) {
+var configureNode = function(ip, port, password, keypair, callback) {
 
     if(argv.ipkOnly && argv.hwInfo) {
         console.log("Not connecting to device at all since both --ipkOnly and --hwInfo specified");
@@ -697,7 +733,7 @@ var configureNode = function(ip, port, password, privateKey, callback) {
             port: port,
             username: 'root',
             password: password,
-            privateKey: privateKey
+            privateKey: keypair && keypair.private
         });
 };
 
@@ -739,8 +775,8 @@ function configure() {
         var ip = argv.ip || settings.ip || '192.168.1.1';
         var port = argv.port || settings.port || 22;
         var password = argv.password || settings.rootPassword;
-        var privateKey = settings.rootPrivateKey
-        configureNode(ip, port, password, privateKey, function(err) {
+        var keyPair = settings.rootSshKeypair
+        configureNode(ip, port, password, keyPair, function(err) {
             if(err) {
                 console.error("Error: " + err);
                 return;
